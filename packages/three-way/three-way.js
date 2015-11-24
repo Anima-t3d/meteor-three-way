@@ -250,10 +250,11 @@ if (Meteor.isClient) {
 			eventHandlers: {},
 			helpers: {},
 			updateOfFocusedFieldCallback: null,
+			validateRepeats: false,
 		}, options);
 
-		if (!(options.collection instanceof Mongo.Collection)) {
-			throw new Meteor.Error('options-error', 'collection should be a Mongo.Collection');
+		if (!(options.collection instanceof Mongo.Collection) && !(typeof options.collection === "string") && (options.collection !== null)) {
+			throw new Meteor.Error('options-error', 'collection should be a Mongo.Collection or a string with naming the collection, or null');
 		}
 		options.fields = _.map(options.updatersForServer, (v, k) => k);
 
@@ -378,55 +379,69 @@ if (Meteor.isClient) {
 				_focusedField: new ReactiveVar(null),
 				__level: 0,
 				__mostRecentDatabaseEntry: {},
+				__mostRecentValidationValueVM: {},
+				__mostRecentValidationValueServer: {},
 				__recentDBUpdates: {},
 				__updatesToSkipDueToRelatedObjectUpdate: {},
 			};
+			if (options.collection instanceof Mongo.Collection) {
+				threeWay.collection = options.collection;
+			} else {
+				threeWay.collection = new Mongo.Collection(options.collection);
+			}
+
+			var threeWayMethods = {};
 
 			instance[THREE_WAY_NAMESPACE] = threeWay;
-
-			instance[THREE_WAY_NAMESPACE_METHODS] = {};
+			instance[THREE_WAY_NAMESPACE_METHODS] = threeWayMethods;
 
 			var __rootChanges = 0;
-			instance[THREE_WAY_NAMESPACE_METHODS].setRoots = function(selectorString) {
+			threeWayMethods.setRoots = function(selectorString) {
 				var nodes = instance.$(selectorString);
 				__rootChanges += 1;
 				threeWay.rootNodes = Array.prototype.map.call(nodes, x => x);
 				threeWay._rootNodes.set(selectorString + "|" + __rootChanges);
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].setId = function(id) {
+			threeWayMethods.setId = function(id) {
 				threeWay.id.set(id);
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].getId = function() {
+			threeWayMethods.getId = function() {
 				return threeWay.id.get();
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].get3wInstanceId = function() {
+			threeWayMethods.get3wInstanceId = function() {
 				return threeWay.instanceId.get();
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].get = p => threeWay.data.get(p);
-			instance[THREE_WAY_NAMESPACE_METHODS].set = function(p, v) {
+			threeWayMethods.get = p => threeWay.data.get(p);
+			threeWayMethods.set = function(p, v) {
 				threeWay.data.set(p, v);
 				updateRelatedFields(p, v);
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].get_NR = p => threeWay.dataMirror[p];
-			instance[THREE_WAY_NAMESPACE_METHODS].getAll = () => threeWay.data.all();
-			instance[THREE_WAY_NAMESPACE_METHODS].getAll_NR = () => _.extend({}, threeWay.dataMirror);
+			threeWayMethods.get_NR = p => threeWay.dataMirror[p];
+			threeWayMethods.getAll = () => threeWay.data.all();
+			threeWayMethods.getAll_NR = function() {
+				var ret;
+				Tracker.nonreactive(function() {
+					ret = threeWay.data.all();
+				});
+				return ret;
+			};
 
-			instance[THREE_WAY_NAMESPACE_METHODS].focusedField = () => threeWay._focusedField.get();
-			instance[THREE_WAY_NAMESPACE_METHODS].focusedFieldUpdatedOnServer = p => threeWay._focusedFieldUpdatedOnServer.get(p);
+			threeWayMethods.focusedField = () => threeWay._focusedField.get();
+			threeWayMethods.focusedFieldUpdatedOnServer = p => threeWay._focusedFieldUpdatedOnServer.get(p);
 
-			instance[THREE_WAY_NAMESPACE_METHODS].isSyncedToServer = p => !!threeWay.__serverIsUpdated.get(p);
-			instance[THREE_WAY_NAMESPACE_METHODS].allSyncedToServer = function() {
+			threeWayMethods.isSyncedToServer = p => !!threeWay.__serverIsUpdated.get(p);
+			threeWayMethods.allSyncedToServer = function() {
 				return _.reduce(threeWay.__serverIsUpdated.all(), (m, v) => !!m && !!v, true);
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].isNotInvalid = p => !!threeWay.__dataIsNotInvalid.get(p);
+			threeWayMethods.isNotInvalid = p => !!threeWay.__dataIsNotInvalid.get(p);
 
-			instance[THREE_WAY_NAMESPACE_METHODS].parentDataGet = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.get(p);
-			instance[THREE_WAY_NAMESPACE_METHODS].parentDataGetAll = (levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.all();
-			instance[THREE_WAY_NAMESPACE_METHODS].parentDataSet = (p, v, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.set(p, v);
-			instance[THREE_WAY_NAMESPACE_METHODS].parentDataGet_NR = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].dataMirror[p];
-			instance[THREE_WAY_NAMESPACE_METHODS].parentDataGetAll_NR = (levelsUp) => _.extend({}, instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].dataMirror);
+			threeWayMethods.parentDataGet = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.get(p);
+			threeWayMethods.parentDataGetAll = (levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.all();
+			threeWayMethods.parentDataSet = (p, v, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.set(p, v);
+			threeWayMethods.parentDataGet_NR = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].dataMirror[p];
+			threeWayMethods.parentDataGetAll_NR = (levelsUp) => _.extend({}, instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].dataMirror);
 
-			instance[THREE_WAY_NAMESPACE_METHODS].childDataGetId = function _3w_childDataGetId(childNameArray) {
+			threeWayMethods.childDataGetId = function _3w_childDataGetId(childNameArray) {
 				if (childNameArray instanceof Array) {
 					if (childNameArray.length === 0) {
 						return;
@@ -443,10 +458,10 @@ if (Meteor.isClient) {
 						return threeWay.children[childNameArray[0]][THREE_WAY_NAMESPACE_METHODS].childDataGetId(cn);
 					}
 				} else {
-					return instance[THREE_WAY_NAMESPACE_METHODS].childDataGetId([childNameArray]);
+					return threeWayMethods.childDataGetId([childNameArray]);
 				}
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].childDataSetId = function _3w_childDataSetId(id, childNameArray) {
+			threeWayMethods.childDataSetId = function _3w_childDataSetId(id, childNameArray) {
 				if (childNameArray instanceof Array) {
 					if (childNameArray.length === 0) {
 						return;
@@ -466,10 +481,10 @@ if (Meteor.isClient) {
 						threeWay.children[childNameArray[0]][THREE_WAY_NAMESPACE_METHODS].childDataSetId(id, cn);
 					}
 				} else {
-					instance[THREE_WAY_NAMESPACE_METHODS].childDataSetId(id, [childNameArray]);
+					threeWayMethods.childDataSetId(id, [childNameArray]);
 				}
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].childDataGet = function _3w_childDataGet(p, childNameArray) {
+			threeWayMethods.childDataGet = function _3w_childDataGet(p, childNameArray) {
 				if (childNameArray instanceof Array) {
 					if (childNameArray.length === 0) {
 						return;
@@ -487,10 +502,10 @@ if (Meteor.isClient) {
 						return threeWay.children[childNameArray[0]][THREE_WAY_NAMESPACE_METHODS].childDataGet(p, cn);
 					}
 				} else {
-					return instance[THREE_WAY_NAMESPACE_METHODS].childDataGet(p, [childNameArray]);
+					return threeWayMethods.childDataGet(p, [childNameArray]);
 				}
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].childDataGetAll = function _3w_childDataGetAll(childNameArray) {
+			threeWayMethods.childDataGetAll = function _3w_childDataGetAll(childNameArray) {
 				if (childNameArray instanceof Array) {
 					if (childNameArray.length === 0) {
 						return;
@@ -508,10 +523,10 @@ if (Meteor.isClient) {
 						return threeWay.children[childNameArray[0]][THREE_WAY_NAMESPACE_METHODS].childDataGetAll(cn);
 					}
 				} else {
-					return instance[THREE_WAY_NAMESPACE_METHODS].childDataGetAll([childNameArray]);
+					return threeWayMethods.childDataGetAll([childNameArray]);
 				}
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].childDataSet = function _3w_childDataSet(p, v, childNameArray) {
+			threeWayMethods.childDataSet = function _3w_childDataSet(p, v, childNameArray) {
 				if (childNameArray instanceof Array) {
 					if (childNameArray.length === 0) {
 						return;
@@ -532,25 +547,25 @@ if (Meteor.isClient) {
 						return threeWay.children[childNameArray[0]][THREE_WAY_NAMESPACE_METHODS].childDataSet(p, v, cn);
 					}
 				} else {
-					return instance[THREE_WAY_NAMESPACE_METHODS].childDataSet(p, v, [childNameArray]);
+					return threeWayMethods.childDataSet(p, v, [childNameArray]);
 				}
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].childDataGet_NR = function _3w_childDataGet_NR(p, childNameArray) {
+			threeWayMethods.childDataGet_NR = function _3w_childDataGet_NR(p, childNameArray) {
 				var value;
 				Tracker.nonreactive(function() {
-					value = instance[THREE_WAY_NAMESPACE_METHODS].childDataGet(p, childNameArray);
+					value = threeWayMethods.childDataGet(p, childNameArray);
 				});
 				return value;
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].childDataGetAll_NR = function _3w_childDataGetAll_NR(childNameArray) {
+			threeWayMethods.childDataGetAll_NR = function _3w_childDataGetAll_NR(childNameArray) {
 				var value;
 				Tracker.nonreactive(function() {
-					value = instance[THREE_WAY_NAMESPACE_METHODS].childDataGetAll(childNameArray);
+					value = threeWayMethods.childDataGetAll(childNameArray);
 				});
 				return value;
 			};
 
-			instance[THREE_WAY_NAMESPACE_METHODS].getAllDescendants_NR = function _3w_getAllDescendants_NR(levels, currDepth, path) {
+			threeWayMethods.getAllDescendants_NR = function _3w_getAllDescendants_NR(levels, currDepth, path) {
 				if (typeof levels === "undefined") {
 					levels = Number.MAX_SAFE_INTEGER;
 				}
@@ -584,26 +599,71 @@ if (Meteor.isClient) {
 				return descendants;
 			};
 
-			instance[THREE_WAY_NAMESPACE_METHODS].siblingDataGet = function _3w_siblingDataGet(p, siblingName) {
+			threeWayMethods.resetVMOnlyData = function _3w_resetVMOnlyData() {
+				// Reset VM Only data to initial values (including those from `twdata` tags)
+				_.forEach(threeWay.vmOnlyData_Initial, function(value, field) {
+					threeWay.data.set(field, value);
+				});
+			};
+
+			threeWayMethods.getInheritedHelper = function _3w_getInheritedHelper(h) {
+				if (typeof options.helpers[h] !== "undefined") {
+					return options.helpers[h];
+				} else if (!!instance.parentTemplate() && !!instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS]) {
+					return instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS].getInheritedHelper(h);
+				}
+			};
+			threeWayMethods.getInheritedEventHandler = function _3w_getInheritedEventHandler(evt) {
+				if (options.eventHandlers[evt] instanceof Function) {
+					return options.eventHandlers[evt];
+				} else if (!!instance.parentTemplate() && !!instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS]) {
+					return instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS].getInheritedEventHandler(evt);
+				}
+			};
+			threeWayMethods.getInheritedPreProcessor = function _3w_getInheritedPreProcessor(p) {
+				if (options.preProcessors[p] instanceof Function) {
+					return options.preProcessors[p];
+				} else if (!!instance.parentTemplate() && !!instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS]) {
+					return instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS].getInheritedPreProcessor(p);
+				}
+			};
+
+			threeWayMethods.__getFamilyHeritageHelperBundle = function _3w_getFamilyHeritageHelperBundle(bundle) {
+				// Returns all helpers than can be accessed via getInheritedHelper (i.e.: own, and from ancestors)
+				if (typeof bundle === "undefined") {
+					bundle = {};
+				}
+				_.forEach(options.helpers, function(fn, h) {
+					if (!bundle.hasOwnProperty(h)) {
+						bundle[h] = fn;
+					}
+				});
+				if (!!instance.parentTemplate() && !!instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS]) {
+					bundle = instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS].__getFamilyHeritageHelperBundle(bundle);
+				}
+				return bundle;
+			};
+
+			threeWayMethods.siblingDataGet = function _3w_siblingDataGet(p, siblingName) {
 				return instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS].childDataGet(p, siblingName);
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].siblingDataGetAll = function _3w_siblingDataGet(siblingName) {
+			threeWayMethods.siblingDataGetAll = function _3w_siblingDataGet(siblingName) {
 				return instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS].childDataGetAll(siblingName);
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].siblingDataSet = function _3w_siblingDataSet(p, v, siblingName) {
+			threeWayMethods.siblingDataSet = function _3w_siblingDataSet(p, v, siblingName) {
 				return instance.parentTemplate()[THREE_WAY_NAMESPACE_METHODS].childDataSet(p, v, siblingName);
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].siblingDataGet_NR = function _3w_siblingDataGet_NR(p, siblingName) {
+			threeWayMethods.siblingDataGet_NR = function _3w_siblingDataGet_NR(p, siblingName) {
 				var value;
 				Tracker.nonreactive(function() {
-					value = instance[THREE_WAY_NAMESPACE_METHODS].siblingDataGet(p, siblingName);
+					value = threeWayMethods.siblingDataGet(p, siblingName);
 				});
 				return value;
 			};
-			instance[THREE_WAY_NAMESPACE_METHODS].siblingDataGetAll_NR = function _3w_siblingDataGetAll_NR(siblingName) {
+			threeWayMethods.siblingDataGetAll_NR = function _3w_siblingDataGetAll_NR(siblingName) {
 				var value;
 				Tracker.nonreactive(function() {
-					value = instance[THREE_WAY_NAMESPACE_METHODS].siblingDataGetAll(siblingName);
+					value = threeWayMethods.siblingDataGetAll(siblingName);
 				});
 				return value;
 			};
@@ -669,10 +729,9 @@ if (Meteor.isClient) {
 						if (typeof options.updatersForServer[f] === "string") {
 							Meteor.apply(options.updatersForServer[f], params);
 						} else if (typeof options.updatersForServer[f] === "function") {
-							var currTemplateInstanceFunc = Template._currentTemplateInstanceFunc;
-							Template._currentTemplateInstanceFunc = () => instance;
-							options.updatersForServer[f].apply(instance, params);
-							Template._currentTemplateInstanceFunc = currTemplateInstanceFunc;
+							instance.callFunctionWithTemplateContext(function() {
+								options.updatersForServer[f].apply(instance, params);
+							}, this);
 						} else {
 							var updateTime = new Date();
 							Meteor.apply(options.updatersForServer[f].method, params, {}, function(err, res) {
@@ -741,7 +800,7 @@ if (Meteor.isClient) {
 							// Validate before send
 							if (threeWay.validateInput(curr_f, value)) {
 								threeWay.__dataIsNotInvalid.set(curr_f, true);
-								var vmData = _.extend({}, threeWay.dataMirror);
+								var vmData = threeWayMethods.getAll_NR();
 								var valueToSend = options.dataTransformToServer[matchFamily](value, vmData);
 
 								if (IN_DEBUG_MODE_FOR('db')) {
@@ -797,68 +856,6 @@ if (Meteor.isClient) {
 			////////////////////////////////////////////////////////////////
 
 
-			////////////////////////////////////////////////////////////////
-			// For batching Meteor calls
-			//
-			var templateLevelUpdatePromiseLedger = {};
-			var templateLevelUpdatePromiseLedger_LastTimings = {};
-
-			function meteorApply_usePromiseBins(fieldPath, method, args, _options) {
-				if (!!_options) {
-					_options = {};
-				}
-				var bin = fieldPath.split('.')[0];
-				if (typeof templateLevelUpdatePromiseLedger[bin] === "undefined") {
-					templateLevelUpdatePromiseLedger[bin] = Promise.resolve(true);
-					templateLevelUpdatePromiseLedger_LastTimings[bin] = (new Date()).getTime();
-				}
-
-				templateLevelUpdatePromiseLedger[bin] = templateLevelUpdatePromiseLedger[bin]
-				// need "resist change list" to "resist updates" in the observer
-				// clear it once method returns (after the methodInterval delay)
-				.then(function() {
-					return new Promise(function(resolve, reject) {
-							if (IN_DEBUG_MODE_FOR('methods')) {
-								console.info('[methods|' + bin + '] Updating server...\n', method, args);
-							}
-							Meteor.apply(method, args, _options, function meteorApplyCB(err, res) {
-								if (!!err) {
-									reject(err);
-								} else {
-									resolve(res);
-								}
-							});
-						})
-						.then(function() {
-							return new Promise(function(resolve) {
-								var t_now = (new Date()).getTime();
-								if (IN_DEBUG_MODE_FOR('methods')) {
-									console.info('[methods|' + bin + '] Updated server.\n', method, args);
-									console.info('[methods|' + bin + '] Since Last: ' + (t_now - templateLevelUpdatePromiseLedger_LastTimings[bin]));
-								}
-
-								// Pausing for updates from the database to be complete
-								templateLevelUpdatePromiseLedger_LastTimings[bin] = t_now;
-								setTimeout(function() {
-									if (IN_DEBUG_MODE_FOR('methods')) {
-										console.info('[methods|' + bin + '] Waited: ' + ((new Date()).getTime() - templateLevelUpdatePromiseLedger_LastTimings[bin]), method, args);
-									}
-									resolve(true);
-								}, options.methodInterval);
-							});
-						})
-						.catch(function(err) {
-							if (IN_DEBUG_MODE_FOR('methods')) {
-								console.error('[Error updating server]', err);
-							}
-						});
-				});
-			}
-			//
-			// End Meteor call batching
-			////////////////////////////////////////////////////////////////
-
-
 			instance.autorun(function() {
 				threeWay.dataMirror = threeWay.data.all();
 				if (IN_DEBUG_MODE_FOR('data-mirror')) {
@@ -866,11 +863,11 @@ if (Meteor.isClient) {
 				}
 			});
 
-			var vmOnlyData = _.extend({}, options.viewModelToViewOnly);
+			threeWay.vmOnlyData_Initial = _.extend({}, options.viewModelToViewOnly);
 			if (!!instance.data && !!instance.data._3w_additionalViewModelOnlyData) {
-				vmOnlyData = _.extend(vmOnlyData, instance.data._3w_additionalViewModelOnlyData);
+				threeWay.vmOnlyData_Initial = _.extend(threeWay.vmOnlyData_Initial, instance.data._3w_additionalViewModelOnlyData);
 			}
-			_.forEach(vmOnlyData, function(value, field) {
+			_.forEach(threeWay.vmOnlyData_Initial, function(value, field) {
 				threeWay.data.set(field, value);
 				if (IN_DEBUG_MODE_FOR('vm-only')) {
 					console.log("[vm-only] Setting up initial value for " + field + " to ", value, " using template-level options.");
@@ -879,6 +876,7 @@ if (Meteor.isClient) {
 				if (matchParamStrings(options.fields, field).length > 0) {
 					// Do not set-up update computation (not an actual vm-only field)
 					console.warn("[vm-only] Not an actual view model only field:", field);
+					delete threeWay.vmOnlyData_Initial[field];
 				} else {
 					// Set up update computation as per normal (honest vm-only field)
 					threeWay._dataUpdateComputations[field] = Tracker.autorun(function() {
@@ -946,7 +944,7 @@ if (Meteor.isClient) {
 					pushToEndOfEventQueue(function forceFocusActiveElementJustInCase() {
 						// Don't trigger synchronously to avoid flushes in a flush/computation
 						$(elem).trigger('focus');
-					}, instance);					
+					}, instance);
 				})();
 
 				// Replace ViewModel only data and set-up mirroring again
@@ -964,6 +962,8 @@ if (Meteor.isClient) {
 				});
 
 				threeWay.__mostRecentDatabaseEntry = {};
+				threeWay.__mostRecentValidationValueVM = {};
+				threeWay.__mostRecentValidationValueServer = {};
 				threeWay.__recentDBUpdates = {};
 				threeWay.__updatesToSkipDueToRelatedObjectUpdate = {};
 
@@ -982,7 +982,7 @@ if (Meteor.isClient) {
 					// Retrieve only the necessary fields
 					// Not doing a minimal field set retrieval because
 					// that aspect should have been handled by the subscription
-					var cursor = options.collection.find(_id);
+					var cursor = threeWay.collection.find(_id);
 
 					//////////////////////////////////////////////////// 
 					// Descend into objects and arrays
@@ -1047,8 +1047,8 @@ if (Meteor.isClient) {
 										var focusedField;
 										var currentValue;
 										Tracker.nonreactive(function() {
-											focusedField = instance[THREE_WAY_NAMESPACE_METHODS].focusedField();
-											currentValue = instance[THREE_WAY_NAMESPACE_METHODS].get(focusedField);
+											focusedField = threeWayMethods.focusedField();
+											currentValue = threeWayMethods.get(focusedField);
 										});
 										if ((focusedField === curr_f) && !!options.updateOfFocusedFieldCallback) {
 											threeWay._focusedFieldUpdatedOnServer.set(curr_f, true);
@@ -1139,7 +1139,7 @@ if (Meteor.isClient) {
 					// Setting Up Observers
 					threeWay.observer = cursor.observeChanges({
 						added: function(id, fields) {
-							var doc = options.collection.findOne(id, {
+							var doc = threeWay.collection.findOne(id, {
 								reactive: false
 							});
 							if (IN_DEBUG_MODE_FOR('observer')) {
@@ -1167,7 +1167,7 @@ if (Meteor.isClient) {
 							});
 						},
 						changed: function(id, fields) {
-							var doc = options.collection.findOne(id, {
+							var doc = threeWay.collection.findOne(id, {
 								reactive: false
 							});
 							if (IN_DEBUG_MODE_FOR('observer')) {
@@ -1243,18 +1243,12 @@ if (Meteor.isClient) {
 					}
 				}
 
-				if (IN_DEBUG_MODE_FOR('validation')) {
-					console.log('[validation] Doing validation... Field: ' + field + '; Value:', value, '; Validation Info (VM):', threeWay.fieldMatchParamsForValidationVM[field], '; Validation Info (Server):', threeWay.fieldMatchParamsForValidationServer[field]);
-				}
-
-				var vmData = _.extend({}, threeWay.dataMirror);
+				var vmData = threeWayMethods.getAll_NR();
 
 				var matchFamily = threeWay.fieldMatchParams[field] && threeWay.fieldMatchParams[field].match || null;
 
 				var matchFamilyVM = threeWay.fieldMatchParamsForValidationVM[field] && threeWay.fieldMatchParamsForValidationVM[field].match;
-				var matchParamsVM = threeWay.fieldMatchParamsForValidationVM[field] && threeWay.fieldMatchParamsForValidationVM[field].params;
 				var matchFamilyServer = threeWay.fieldMatchParamsForValidationServer[field] && threeWay.fieldMatchParamsForValidationServer[field].match;
-				var matchParamsServer = threeWay.fieldMatchParamsForValidationServer[field] && threeWay.fieldMatchParamsForValidationServer[field].params;
 
 				var useValidatorForVM = !!threeWay.fieldMatchParamsForValidationVM[field] && !!options.validatorsVM[matchFamilyVM];
 				var useValidatorForServer = validateForServer && !!threeWay.fieldMatchParamsForValidationServer[field] && !!options.validatorsServer[matchFamilyServer];
@@ -1262,33 +1256,77 @@ if (Meteor.isClient) {
 				var valueToUse = value;
 				var passed = true;
 				var validator, successCB, failureCB;
-				if (useValidatorForVM) {
-					validator = !!options.validatorsVM[matchFamilyVM].validator ? options.validatorsVM[matchFamilyVM].validator : () => true;
-					successCB = !!options.validatorsVM[matchFamilyVM].success ? options.validatorsVM[matchFamilyVM].success : function() {};
-					failureCB = !!options.validatorsVM[matchFamilyVM].failure ? options.validatorsVM[matchFamilyVM].failure : function() {};
-					passed = validator(valueToUse, vmData, matchParamsVM);
 
-					if (passed) {
-						successCB(instance, valueToUse, vmData, matchFamilyVM, matchParamsVM);
-					} else {
-						failureCB(instance, valueToUse, vmData, matchFamilyVM, matchParamsVM);
+				var didValidationWork = false;
+
+				instance.callFunctionWithTemplateContext(function() {
+					if (useValidatorForVM) {
+						validator = !!options.validatorsVM[matchFamilyVM].validator ? options.validatorsVM[matchFamilyVM].validator : () => true;
+						successCB = !!options.validatorsVM[matchFamilyVM].success ? options.validatorsVM[matchFamilyVM].success : function() {};
+						failureCB = !!options.validatorsVM[matchFamilyVM].failure ? options.validatorsVM[matchFamilyVM].failure : function() {};
+
+						if (options.validateRepeats || (typeof threeWay.__mostRecentValidationValueVM[field] === "undefined") || !_.isEqual(threeWay.__mostRecentValidationValueVM[field].value, valueToUse)) {
+							// If successive repeat... don't repeat validation
+							didValidationWork = true;
+
+							if (IN_DEBUG_MODE_FOR('validation')) {
+								console.log('[validation] Doing validation (VM)... Field: ' + field + '; Value:', value, '; Validation Info (VM):', threeWay.fieldMatchParamsForValidationVM[field]);
+							}
+
+							passed = validator.call(instance, valueToUse, threeWay.fieldMatchParamsForValidationVM[field], vmData);
+							if (passed) {
+								successCB.call(instance, valueToUse, threeWay.fieldMatchParamsForValidationVM[field], vmData);
+							} else {
+								failureCB.call(instance, valueToUse, threeWay.fieldMatchParamsForValidationVM[field], vmData);
+							}
+
+							threeWay.__mostRecentValidationValueVM[field] = {
+								value: value,
+								outcome: passed,
+							};
+						} else {
+							if (IN_DEBUG_MODE_FOR('validation')) {
+								console.log('[validation] Not doing validation (VM) due to repeat value... Field: ' + field + '; Value:', value, '; Validation Info (VM):', threeWay.fieldMatchParamsForValidationVM[field]);
+							}
+							passed = threeWay.__mostRecentValidationValueVM[field].outcome;
+						}
 					}
-				}
-				if (passed && useValidatorForServer) {
-					valueToUse = options.dataTransformToServer[matchFamily](value, vmData);
-					validator = !!options.validatorsServer[matchFamilyServer].validator ? options.validatorsServer[matchFamilyServer].validator : () => true;
-					successCB = !!options.validatorsServer[matchFamilyServer].success ? options.validatorsServer[matchFamilyServer].success : function() {};
-					failureCB = !!options.validatorsServer[matchFamilyServer].failure ? options.validatorsServer[matchFamilyServer].failure : function() {};
-					passed = validator(valueToUse, matchParamsServer);
+					if (passed && useValidatorForServer) {
+						valueToUse = options.dataTransformToServer[matchFamily](value, vmData);
+						validator = !!options.validatorsServer[matchFamilyServer].validator ? options.validatorsServer[matchFamilyServer].validator : () => true;
+						successCB = !!options.validatorsServer[matchFamilyServer].success ? options.validatorsServer[matchFamilyServer].success : function() {};
+						failureCB = !!options.validatorsServer[matchFamilyServer].failure ? options.validatorsServer[matchFamilyServer].failure : function() {};
 
-					if (passed) {
-						successCB(instance, valueToUse, vmData, matchFamilyServer, matchParamsServer);
-					} else {
-						failureCB(instance, valueToUse, vmData, matchFamilyServer, matchParamsServer);
+						if (options.validateRepeats || (typeof threeWay.__mostRecentValidationValueServer[field] === "undefined") || !_.isEqual(threeWay.__mostRecentValidationValueServer[field].serverValue, valueToUse)) {
+							// If successive repeat... don't repeat validation
+							didValidationWork = true;
+
+							if (IN_DEBUG_MODE_FOR('validation')) {
+								console.log('[validation] Doing validation (Server)... Field: ' + field + '; Value:', value, '; Validation Info (Server):', threeWay.fieldMatchParamsForValidationServer[field]);
+							}
+
+							passed = validator.call(instance, valueToUse, threeWay.fieldMatchParamsForValidationServer[field], vmData);
+							if (passed) {
+								successCB.call(instance, valueToUse, threeWay.fieldMatchParamsForValidationServer[field], vmData);
+							} else {
+								failureCB.call(instance, valueToUse, threeWay.fieldMatchParamsForValidationServer[field], vmData);
+							}
+
+							threeWay.__mostRecentValidationValueServer[field] = {
+								value: value,
+								serverValue: valueToUse,
+								outcome: passed,
+							};
+						} else {
+							if (IN_DEBUG_MODE_FOR('validation')) {
+								console.log('[validation] Not doing validation (Server) due to repeat value... Field: ' + field + '; Value:', value, '; Validation Info (Server):', threeWay.fieldMatchParamsForValidationServer[field]);
+							}
+							passed = threeWay.__mostRecentValidationValueServer[field].outcome;
+						}
 					}
-				}
+				}, this);
 
-				if (IN_DEBUG_MODE_FOR('validation')) {
+				if (didValidationWork && IN_DEBUG_MODE_FOR('validation')) {
 					console.log('[validation] Validation result. Field: ' + field + '; Value:', value, '; Passed: ' + passed);
 				}
 
@@ -1317,59 +1355,84 @@ if (Meteor.isClient) {
 					additionalFailureCondition = () => false;
 				}
 
-				var currTemplateInstanceFunc = Template._currentTemplateInstanceFunc;
-				Template._currentTemplateInstanceFunc = () => instance;
-				var getFailed = false;
-				var sourceElems = source.split("#").map(x => x.trim()).filter(x => x !== "");
-				var value = sourceElems.map(function(src) {
-					var _value;
-					if (useHelpers && !!options.helpers[src]) {
-						_value = options.helpers[src].call(instance);
-					} else if (useHelpers && thisTemplate.__helpers.has(src)) {
-						_value = thisTemplate.__helpers.get(src).call(instance);
-					} else {
-						_value = threeWay.data.get(src);
-					}
+				var value;
+				instance.callFunctionWithTemplateContext(function() {
+					var dataSourceInfomation = [];
+					var getFailed = false;
+					var sourceElems = source.split("#").map(x => x.trim()).filter(x => x !== "");
+					value = sourceElems.map(function(src) {
+						var _value;
+						if (useHelpers && (typeof options.helpers[src] !== "undefined")) {
+							_value = (options.helpers[src] instanceof Function) ? options.helpers[src].call(instance) : options.helpers[src];
+							dataSourceInfomation.push({
+								type: 'helper',
+								name: src
+							});
+						} else if (useHelpers && (typeof threeWayMethods.getInheritedHelper(src) !== "undefined")) {
+							_value = (threeWayMethods.getInheritedHelper(src) instanceof Function) ? threeWayMethods.getInheritedHelper(src).call(instance) : threeWayMethods.getInheritedHelper(src);
+							dataSourceInfomation.push({
+								type: 'ancestor-helper',
+								name: src
+							});
+						} else if (useHelpers && thisTemplate.__helpers.has(src)) {
+							_value = (thisTemplate.__helpers.get(src) instanceof Function) ? thisTemplate.__helpers.get(src).call(instance) : thisTemplate.__helpers.get(src);
+							dataSourceInfomation.push({
+								type: 'blaze-helper',
+								name: src
+							});
+						} else {
+							_value = threeWay.data.get(src);
+							dataSourceInfomation.push(_.extend({
+								type: 'field',
+								name: src
+							}, threeWay.fieldMatchParams[src] || {}));
+						}
 
-					if ((typeof _value === "undefined") || additionalFailureCondition(_value)) {
-						getFailed = true;
-					} else {
-						return _value;
-					}
-				});
-				if (getFailed) {
-					return;
-				}
-
-				var mutatedValue;
-				var firstRunArgs = value.map(x => x);
-				if ((mappings.length === 0) && (value.length === 1)) {
-					// if single valued and no mappings, "unbox"
-					value = value[0];
-				}
-
-				_.forEach(mappings, function(m, idx) {
-					if (!(options.preProcessors[m] instanceof Function)) {
-						console.error('[ThreeWay] No such pre-processor: ' + m, elem);
+						if ((typeof _value === "undefined") || additionalFailureCondition(_value)) {
+							getFailed = true;
+						} else {
+							return _value;
+						}
+					});
+					if (getFailed) {
 						return;
 					}
-
-					if (idx === 0) {
-						mutatedValue = options.preProcessors[m].apply(instance, firstRunArgs.concat([elem, _.extend({}, threeWay.dataMirror)]));
-					} else {
-						mutatedValue = options.preProcessors[m].call(instance, mutatedValue, elem, _.extend({}, threeWay.dataMirror));
+					if (value.length === 1) {
+						dataSourceInfomation = dataSourceInfomation[0];
 					}
 
-					if (processorsMutateValue) {
-						value = mutatedValue;
+					var mutatedValue;
+					var firstRunArgs = value.map(x => x);
+					if ((mappings.length === 0) && (value.length === 1)) {
+						// if single valued and no mappings, "unbox"
+						value = value[0];
+					}
+
+					_.forEach(mappings, function(m, idx) {
+						var preProcessor = threeWayMethods.getInheritedPreProcessor(m);
+						if (!(preProcessor instanceof Function)) {
+							console.error('[ThreeWay] No such pre-processor: ' + m, elem);
+							return;
+						}
+
+						var vmData = threeWayMethods.getAll_NR();
+
+						if (idx === 0) {
+							mutatedValue = preProcessor.apply(instance, firstRunArgs.concat([elem, vmData, dataSourceInfomation]));
+						} else {
+							mutatedValue = preProcessor.call(instance, mutatedValue, elem, vmData, dataSourceInfomation);
+						}
+
+						if (processorsMutateValue) {
+							value = mutatedValue;
+						}
+					});
+
+					if (!processorsMutateValue && (mappings.length > 0) && (value.length === 1)) {
+						// if single valued and mappings do not mutate value, "unbox"
+						value = value[0];
 					}
 				});
-				Template._currentTemplateInstanceFunc = currTemplateInstanceFunc;
-
-				if (!processorsMutateValue && (mappings.length > 0)  && (value.length === 1)) {
-					// if single valued and mappings do not mutate value, "unbox"
-					value = value[0];
-				}
 
 				return value;
 			};
@@ -1561,7 +1624,7 @@ if (Meteor.isClient) {
 									var isUpdated;
 									Tracker.nonreactive(function() {
 										// get current value by digging into document
-										var doc = options.collection.findOne(threeWay.id.get());
+										var doc = threeWay.collection.findOne(threeWay.id.get());
 										var currValue = doc;
 										var fieldNameSplit = fieldName.split('.');
 										while (fieldNameSplit.length > 0) {
@@ -1716,7 +1779,7 @@ if (Meteor.isClient) {
 									var isUpdated;
 									Tracker.nonreactive(function() {
 										// get current value by digging into document
-										var doc = options.collection.findOne(threeWay.id.get());
+										var doc = threeWay.collection.findOne(threeWay.id.get());
 										var currValue = doc;
 										var fieldNameSplit = fieldName.split('.');
 										while (fieldNameSplit.length > 0) {
@@ -1904,7 +1967,7 @@ if (Meteor.isClient) {
 									var isUpdated;
 									Tracker.nonreactive(function() {
 										// get current value by digging into document
-										var doc = options.collection.findOne(threeWay.id.get());
+										var doc = threeWay.collection.findOne(threeWay.id.get());
 										var currValue = doc;
 										var fieldNameSplit = fieldName.split('.');
 										while (fieldNameSplit.length > 0) {
@@ -2192,7 +2255,7 @@ if (Meteor.isClient) {
 							}
 
 							handlerNames.forEach(function(m) {
-								var handler = options.eventHandlers[m];
+								var handler = threeWayMethods.getInheritedEventHandler(m);
 								if (!(handler instanceof Function)) {
 									console.error('[ThreeWay] No such event handler: ' + m, elem);
 									return;
@@ -2232,10 +2295,9 @@ if (Meteor.isClient) {
 											if (IN_DEBUG_MODE_FOR('event')) {
 												console.log("[.event|keyup=" + _eventName + "] Firing " + m + " for", elem);
 											}
-											var currTemplateInstanceFunc = Template._currentTemplateInstanceFunc;
-											Template._currentTemplateInstanceFunc = () => instance;
-											handler.call(this, event, instance, _.extend({}, threeWay.dataMirror));
-											Template._currentTemplateInstanceFunc = currTemplateInstanceFunc;
+											instance.callFunctionWithTemplateContext(function() {
+												handler.call(this, event, instance, threeWayMethods.getAll_NR());
+											}, this);
 										}, [key]));
 										compositeHandlerUsed = true;
 									} else if (eventName.toLowerCase() === 'keydown_' + _eventName.toLowerCase()) {
@@ -2243,10 +2305,9 @@ if (Meteor.isClient) {
 											if (IN_DEBUG_MODE_FOR('event')) {
 												console.log("[.event|keydown=" + _eventName + "] Firing " + m + " for", elem);
 											}
-											var currTemplateInstanceFunc = Template._currentTemplateInstanceFunc;
-											Template._currentTemplateInstanceFunc = () => instance;
-											handler.call(this, event, instance, _.extend({}, threeWay.dataMirror));
-											Template._currentTemplateInstanceFunc = currTemplateInstanceFunc;
+											instance.callFunctionWithTemplateContext(function() {
+												handler.call(this, event, instance, threeWayMethods.getAll_NR());
+											}, this);
 										}, [key]));
 										compositeHandlerUsed = true;
 									}
@@ -2260,10 +2321,9 @@ if (Meteor.isClient) {
 									if (IN_DEBUG_MODE_FOR('event')) {
 										console.log("[.event|" + eventName + "] Firing " + m + " for", elem);
 									}
-									var currTemplateInstanceFunc = Template._currentTemplateInstanceFunc;
-									Template._currentTemplateInstanceFunc = () => instance;
-									handler.call(this, event, instance, _.extend({}, threeWay.dataMirror));
-									Template._currentTemplateInstanceFunc = currTemplateInstanceFunc;
+									instance.callFunctionWithTemplateContext(function() {
+										handler.call(this, event, instance, threeWayMethods.getAll_NR());
+									}, this);
 								});
 							});
 						}));
@@ -2305,12 +2365,25 @@ if (Meteor.isClient) {
 				threeWay.__level = instance.parentTemplate()[THREE_WAY_NAMESPACE].__level + 1;
 			}
 
+
+			//////////////////////////////////////////////////////////////////
+			// Pollute template helper namespace if there is space
+			//////////////////////////////////////////////////////////////////
+			_.forEach(threeWayMethods.__getFamilyHeritageHelperBundle(), function(fn, h) {
+				var thisTemplate = instance && instance.view && instance.view.template;
+				if (!!thisTemplate && !!thisTemplate.__helpers) {
+					if (!thisTemplate.__helpers.has(h)) {
+						thisTemplate.helpers(_.object([[h, fn]]));
+					};
+				}
+			});
 		});
 
 		tmpl.onRendered(function() {
 			var instance = this;
 			var thisTemplateName = instance.view.name.split('.').pop().trim();
 			var threeWay = instance[THREE_WAY_NAMESPACE];
+			var threeWayMethods = instance[THREE_WAY_NAMESPACE_METHODS];
 
 			//////////////////////////////////////////////////////////////////
 			// Set initial values for data (in particular, VM-only fields)
@@ -2337,17 +2410,16 @@ if (Meteor.isClient) {
 				var processors = (processorString === "") ? [] : processorString.split('|').map(x => x.trim()).filter(x => x !== "");
 				var value = initValue;
 
-				var currTemplateInstanceFunc = Template._currentTemplateInstanceFunc;
-				Template._currentTemplateInstanceFunc = () => instance;
-				processors.forEach(function(m) {
-					// processors here do not provide view model data as an argument
-					if (!(options.preProcessors[m] instanceof Function)) {
-						console.error('[ThreeWay] No such pre-processor: ' + m, elem);
-						return;
-					}
-					value = options.preProcessors[m](value, elem, {});
-				});
-				Template._currentTemplateInstanceFunc = currTemplateInstanceFunc;
+				instance.callFunctionWithTemplateContext(function() {
+					processors.forEach(function(m) {
+						// processors here do not provide view model data as an argument
+						if (!(options.preProcessors[m] instanceof Function)) {
+							console.error('[ThreeWay] No such pre-processor: ' + m, elem);
+							return;
+						}
+						value = options.preProcessors[m](value, elem, {});
+					});
+				}, this);
 
 				if (IN_DEBUG_MODE_FOR('vm-only')) {
 					if (processors.length === 0) {
@@ -2357,6 +2429,7 @@ if (Meteor.isClient) {
 						console.log("[vm-only] Processors:", processors, "; Init Value:", initValue, "; Final value:", value);
 					}
 				}
+				threeWay.vmOnlyData_Initial[field] = value;
 				threeWay.data.set(field, value);
 
 				if (typeof threeWay._dataUpdateComputations[field] === "undefined") {
@@ -2397,11 +2470,11 @@ if (Meteor.isClient) {
 				if (IN_DEBUG_MODE_FOR('bind')) {
 					console.log("[bind] Setting root node for instance of " + thisTemplateName + " via selector " + instance.data._3w_rootElementSelector + ". (Prev: " + threeWay.rootNodes.toString().split('|')[0] + ")");
 				}
-				instance[THREE_WAY_NAMESPACE_METHODS].setRoots(instance.data._3w_rootElementSelector);
+				threeWayMethods.setRoots(instance.data._3w_rootElementSelector);
 			} else {
 				// Observe all the elements in the template
 				// (if there is a wrapping element, good... otherwise...)
-				instance[THREE_WAY_NAMESPACE_METHODS].setRoots("*");
+				threeWayMethods.setRoots("*");
 			}
 
 			//////////////////////////////////////////////////////////////////
@@ -2592,7 +2665,7 @@ if (Meteor.isClient) {
 				if (IN_DEBUG_MODE_FOR('new-id')) {
 					console.log("[new-id] Setting initial id for instance of " + thisTemplateName + " to " + instance.data._3w_id);
 				}
-				instance[THREE_WAY_NAMESPACE_METHODS].setId(instance.data._3w_id);
+				threeWayMethods.setId(instance.data._3w_id);
 			}
 
 		});
@@ -2678,6 +2751,105 @@ if (Meteor.isClient) {
 				} else {
 					$(elem.parentElement)
 						.dropdown('set exactly', x.toString().split(',').map(x => x.trim()));
+				}
+			}
+			$(elem.parentElement)
+				.dropdown('refresh');
+			return x;
+		},
+		updateSemanticUIDropdownMultiple: function updateSemanticUIDropdownMultiple(x, elem) {
+			if ((typeof x !== "undefined") && (x !== null)) {
+
+				// check for correct element
+				var validElement = !!elem && !!elem.parentElement && !!elem.parentElement.tagName && (elem.parentElement.tagName.toUpperCase() === "DIV");
+				var parentElementClassList;
+				if (validElement) {
+					parentElementClassList = Array.prototype.map.call(elem.parentElement.classList, x => x.toLowerCase());
+					['ui', 'dropdown', 'multiple'].forEach(function(tag) {
+						if (parentElementClassList.indexOf(tag) === -1) {
+							validElement = false;
+						}
+					});
+				}
+				if (!validElement) {
+					console.warn('Unable to find Semantic UI multiple dropdown element.', elem, elem.parentElement);
+					return x;
+				}
+
+				var dropdown = $(elem.parentElement);
+				var selection = (x.toString().trim() === "") ? [] : x.toString().trim().split(',').map(x => x.trim());
+				var theIcon = dropdown.find('i.dropdown.icon');
+
+				// Remove labels
+				dropdown.find('a.ui.label').remove();
+
+				// Reset selection status
+				dropdown.find('div.item').removeClass("selected active filtered");
+
+				var items = "";
+				var genLabel = (id, label) => "<a class=\"ui label transition visible\" data-value=\"" + id + "\" style=\"display: inline-block !important;\">" + label + "<i class=\"delete icon\"></i></a>\n";
+				var selectedItems = selection.map(id => [id, Array.prototype.filter.call(dropdown.find('div.item'), elem => ((elem.getAttribute('data-value') || "").trim() === id))]);
+				selectedItems.forEach(function(item) {
+					var id = item[0];
+					var elems = item[1];
+					elems.forEach(function(elem) {
+						// Set selection status
+						$(elem).addClass("active filtered");
+						// Prepare to create labels
+						items += genLabel(id, elem.innerText);
+					});
+				});
+
+				// Create labels
+				theIcon.after(items);
+			}
+			$(elem.parentElement)
+				.dropdown('refresh');
+			return x;
+		},
+		updateSemanticUIDropdownSingle: function updateSemanticUIDropdownSingle(x, elem) {
+			if ((typeof x !== "undefined") && (x !== null)) {
+				// check for correct element
+				var validElement = !!elem && !!elem.parentElement && !!elem.parentElement.tagName && (elem.parentElement.tagName.toUpperCase() === "DIV");
+				var parentElementClassList;
+				if (validElement) {
+					parentElementClassList = Array.prototype.map.call(elem.parentElement.classList, x => x.toLowerCase());
+					['ui', 'dropdown'].forEach(function(tag) {
+						if (parentElementClassList.indexOf(tag) === -1) {
+							validElement = false;
+						}
+					});
+					if (parentElementClassList.indexOf('multiple') !== -1) {
+						// not a single dropdown
+						validElement = false;
+					}
+				}
+				if (!validElement) {
+					console.warn('Unable to find Semantic UI (single) dropdown element.', elem, elem.parentElement);
+					return x;
+				}
+
+				var selectedItem = x.toString().trim();
+				var dropdown = $(elem.parentElement);
+
+				// Reset selection status
+				dropdown.find('div.item').removeClass("selected active");
+
+				var textValue;
+				var selectedItems = Array.prototype.filter.call(dropdown.find('div.item'), elem => ((elem.getAttribute('data-value') || "").trim() === selectedItem));
+				selectedItems.forEach(function(elem) {
+					// Set selection status
+					$(elem).addClass("selected active");
+					// Get label text
+					textValue = elem.innerText;
+				});
+
+				// Update value
+				if (!!textValue) {
+					dropdown
+						.find('div.text')
+						.removeClass('default')
+						.text(textValue);
 				}
 			}
 			$(elem.parentElement)
@@ -2807,4 +2979,5 @@ if (Meteor.isClient) {
 			};
 		},
 	});
+
 }

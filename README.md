@@ -94,7 +94,7 @@ Let's start with a simple vanilla set-up.
 ```javascript
 ThreeWay.prepare(Template.DemoThreeWay, {
 		// The relevant Mongo.Collection
-		collection: DataCollection,
+		collection: DataCollection,  // alt: string with collection name or null
 
 		// Meteor methods for updating the database
 		// The keys being the respective fields/field selectors for the database
@@ -137,6 +137,17 @@ instance._3w_setId(_id);
 
 ... and things will happen.
 
+Here is a sample data-binding string:
+```html
+<input data-bind="value: email"></div>
+```
+... and here is one which gives a sense of typical use...
+```html
+<input data-bind="value: email; style: {color: emailValidationErrorText|trueIfNonEmpty|redIfTrue}"></div>
+<div data-bind="html: emailValidationErrorText; visible: emailValidationErrorText|trueIfNonEmpty" style="color: red;"></div>
+```
+this will be elaborated upon later.
+
 ### "Intermediate-level" Set Up
 
 Now here are more of the settings, including:
@@ -147,7 +158,7 @@ Now here are more of the settings, including:
 ```javascript
 ThreeWay.prepare(Template.DemoThreeWay, {
 		// The relevant Mongo.Collection
-		collection: DataCollection,
+		collection: DataCollection,  // alt: string with collection name or null
 
 		// Meteor methods for updating the database
 		// The keys being the respective fields/field selectors for the database
@@ -213,6 +224,20 @@ ThreeWay.prepare(Template.DemoThreeWay, {
 });
 ```
 
+Returning to the previous example:
+```html
+<input data-bind="value: email; style: {color: emailValidationErrorText|trueIfNonEmpty|redIfTrue}"></div>
+<div data-bind="html: emailValidationErrorText; visible: emailValidationErrorText|trueIfNonEmpty" style="color: red;"></div>
+```
+... the "pipes" take data (from helpers or data fields) and pass them through a pipeline of pre-processors. For "display bindings" like `html` and `text`, the final value is displayed.
+
+Suppose `emailValidationErrorText` were `""` then piping it through `trueIfNonEmpty` would lead to `false`, and piping that through `redIfTrue` would return `''`. So in the event of "no validation error", the color of the text would remain the default inherited value.
+
+For "value bindings" like `value` and `checked`, the pipelines are only used to do DOM manipulation. This is useful for custom elements such as [Semantic UI dropdowns](http://semantic-ui.com/modules/dropdown.html).
+
+More on this in a bit.
+
+
 ### Set Up: The Full Parameter Set
 
 At this point, one might have a look at the full parameter set. Which will include:
@@ -227,7 +252,7 @@ Further elaboration is available in the documentation below.
 ```javascript
 ThreeWay.prepare(Template.DemoThreeWay, {
 		// The relevant Mongo.Collection
-		collection: DataCollection,
+		collection: DataCollection,  // alt: string with collection name or null
 
 		// Meteor methods for updating the database
 		// The keys being the respective fields/field selectors for the database
@@ -269,37 +294,42 @@ ThreeWay.prepare(Template.DemoThreeWay, {
 
 		// Validators under validatorsVM consider view-model data
 		// Useful for making sure that transformations to server values do not fail
-		// Arguments: (value, vmData, wildCardParams)
+		// Validators under validatorsServer consider transformed data (for the server)
+		//
 		// validators have method signature:
-		//   function(value, wildCardParams)
+		//   function(value, matchInformation, vmData)
 		// success/failure call backs have signature:
-		//   function(template, value, vmData, field, wildCardParams)
+		//   function(value, matchInformation, vmData)
+		// all are called with the template instance as context
+		//
+		// matchInformation takes the form:
+		//   {
+		//      "fieldPath": "personal.otherArr.0.a",
+		//      "match": "personal.otherArr.*.*",
+		//      "params": ["0","a"]
+		//   }
 		validatorsVM: {
 				// tags seems to be a decent candidate for one here
 				// but see below
 		},
-
-		// Validators under validatorsServer consider transformed values
-		// and are called only if the VM validation check does not fail
-		// (no additional view-model data, work with that somewhere else)
-		// validators have method signature:
-		//   function(value, wildCardParams)
-		// success/failure call backs have signature:
-		//   function(template, value, vmData, field, wildCardParams)
 		validatorsServer: {
 				tags: {
-						validator: function(x, vmData, wildCardParams) {
+						validator: function(value, matchInformation, vmData) {
 								// tags must begin with "tag"
 								return value.filter(x => x.substr(0, 3).toLowerCase() !== 'tag').length === 0;
 						},
-						success: function(template, value, vmData, field, wildCardParams) {
-								template._3w_set('tagsValidationErrorText', '');
+						success: function(value, matchInformation, vmData) {
+								var instance = this;
+								instance._3w_.set('tagsValidationErrorText', '');
 						},
-						failure: function(template, value, vmData, field, wildCardParams) {
-								template._3w_set('tagsValidationErrorText', 'Each tag should begin with \"tag\".');
+						failure: function(value, matchInformation, vmData) {
+								var instance = this;
+								instance._3w_.set('tagsValidationErrorText', 'Each tag should begin with \"tag\".');
 						},
 				},
 		},
+		// determines whether to re-validate repeated values
+		validateRepeats: false,  // (default: false)
 
 		// Helper functions that may be used as input for display-type bindings
 		// Order of search: three-way helpers, then template helpers, then data
@@ -381,6 +411,14 @@ ThreeWay.prepare(Template.DemoThreeWay, {
 		}
 });
 ```
+
+And we are back to that example:
+```html
+<input data-bind="value: email; style: {color: emailValidationErrorText|trueIfNonEmpty|redIfTrue}"></div>
+<div data-bind="html: emailValidationErrorText; visible: emailValidationErrorText|trueIfNonEmpty" style="color: red;"></div>
+```
+... the example options above are a little disjoint from this snippet, but it should be clear that defining a validator will inform `ThreeWay` of whether input is valid or not, and then set `emailValidationErrorText` to a non-empty string if there is a validation error. So when there is a validation error, the error message will be displayed and the color of the input field will be set to red.
+
 
 ## Documentation
 
@@ -697,6 +735,8 @@ One might find it to be particularly useful.
 
 A tenuous design decision has been made not to phase out helpers. A less tenuous design decision is to not unify helpers with pre-processors based on their different method signatures.
 
+Helpers may be inherited.
+
 #### Multi-variable Display Bindings
 
 Sometimes one variable alone is not enough to determine the state of a DOM property. For example, to determine whether a phone number is valid, might depend both on the number and on the country. On the other hand, that example is faulty since a validation callback can do the relevant computations with full access to the view model.
@@ -734,7 +774,8 @@ eventHandlers: {
 <input data-bind="value: sliderValue; event: {mousedown: dragStartHandler, mouseup: dragEndHandler|saySomethingHappy}" type="range">
 ```
 
-**Question**: Should these fire before or after the usual `change`-type events? Presently it happens after. (Does it matter? If it does, should it?)
+Event handlers may be inherited.
+
 
 ### View Model to View Only Elements
 
@@ -818,7 +859,9 @@ The following methods are crammed onto each template instance in an `onCreated` 
 
  - `focusedFieldUpdatedOnServer(prop)`: indicates whether field `prop` was updated on the server while the relevant field was in focus (and a `updateOfFocusedFieldCallback` callback was defined in `options`) and hence the field is out of sync
 
-#### Ancestor Data
+ - `resetVMOnlyData`: resets view-model only data to initial values (including those from `twdata` tags)
+
+#### Ancestor Data (and other possessions)
 
  - `parentDataGet(p, levelsUp)`: returns property `p` from parent instance `levelsUp` levels up (default: 1)
 
@@ -829,6 +872,12 @@ The following methods are crammed onto each template instance in an `onCreated` 
  - `parentDataGet_NR(p, levelsUp)`: (non-reactively) returns property `p` from parent instance `levelsUp` levels up (default: 1)
 
  - `parentDataGetAll_NR(levelsUp)`: (non-reactively) returns all data from parent instance `levelsUp` levels up (default: 1)
+
+ - `getInheritedHelper(name)`: seeks out closest ancestor (self included) with helper having name `name` and returns it if available.
+
+ - `getInheritedEventHandler(name)`: seeks out closest ancestor (self included) with event handler having name `name` and returns it if available.
+
+ - `getInheritedPreProcessor(name)`: seeks out closest ancestor (self included) with pre-processor having name `name` and returns it if available.
 
 #### Descendant Data
 
@@ -950,7 +999,16 @@ preProcessors: {
 
 Multi-way data-bindings such as `value` and `checked` use pre-processing pipelines to deal with DOM manipulation only (e.g.: [Semantic UI dropdowns](http://semantic-ui.com/modules/dropdown.html) via `ThreeWay.preProcessors.updateSemanticUIDropdown`). Pipeline functions do not manipulate value.
 
-Pre-processors have method signature `function(value, elem, vmData)` where `value` is the value in the view model, `elem` is the bound element, and `vmData` is a dictionary containing all the data from the view model.
+Pre-processors have method signature `function(value, elem, vmData, dataSourceInfomation)` where `value` is the value in the view model, `elem` is the bound element, `vmData` is a dictionary containing all the data from the view model, and `dataSourceInfomation` contains information on the source of the data in the form:
+```javascript
+{
+		"type": 'field',
+		"name": 'personal.otherArr.0.a',
+		"fieldPath": "personal.otherArr.0.a",  // applicable if source is a field from database
+		"match": "personal.otherArr.*.*",      // applicable if source is a field from database
+		"params": ["0","a"]                    // applicable if source is a field from database
+}
+```
 
 **Example Use Case**: Consider an input field with some validator. An invalid value might cause some validation error message to be set to be non-empty, and that change in view model data might trigger various forms of presentation. For example:
 
@@ -960,6 +1018,8 @@ Pre-processors have method signature `function(value, elem, vmData)` where `valu
 
 Pre-processors are called with `this` bound to template instance, and `Template.instance()` is also accessible. (Note: Be careful of lexically scoped arrow functions that overrides `call`/`apply`/`bind`.)
 
+Pre-processors may be inherited.
+
 ### Data Validation
 
 Data validators are defined as follows:
@@ -967,38 +1027,44 @@ Data validators are defined as follows:
 ```javascript
 // Validators under validatorsVM consider view-model data
 // Useful for making sure that transformations to server values do not fail
-// Arguments: (value, vmData, wildCardParams)
+// Validators under validatorsServer consider transformed data (for the server)
+//
 // validators have method signature:
-//   function(value, wildCardParams)
+//   function(value, matchInformation, vmData)
 // success/failure call backs have signature:
-//   function(template, value, vmData, field, wildCardParams)
+//   function(value, matchInformation, vmData)
+// all are called with the template instance as context
+//
+// matchInformation takes the form:
+//   {
+//      "fieldPath": "personal.otherArr.0.a",
+//      "match": "personal.otherArr.*.*",
+//      "params": ["0","a"]
+//   }
 validatorsVM: {
 		// tags seems to be a decent candidate for one here
 		// but see below
 },
-
-// Validators under validatorsServer consider transformed values
-// and are called only if the VM validation check does not fail
-// (no additional view-model data, work with that somewhere else)
-// validators have method signature:
-//   function(value, wildCardParams)
-// success/failure call backs have signature:
-//   function(template, value, vmData, field, wildCardParams)
 validatorsServer: {
 		tags: {
-				validator: function(x, vmData, wildCardParams) {
+				validator: function(value, matchInformation, vmData) {
 						// tags must begin with "tag"
 						return value.filter(x => x.substr(0, 3).toLowerCase() !== 'tag').length === 0;
 				},
-				success: function(template, value, vmData, field, wildCardParams) {
-						template._3w_set('tagsValidationErrorText', '');
+				success: function(value, matchInformation, vmData) {
+						var instance = this;
+						instance._3w_.set('tagsValidationErrorText', '');
 				},
-				failure: function(template, value, vmData, field, wildCardParams) {
-						template._3w_set('tagsValidationErrorText', 'Each tag should begin with \"tag\".');
+				failure: function(value, matchInformation, vmData) {
+						var instance = this;
+						instance._3w_.set('tagsValidationErrorText', 'Each tag should begin with \"tag\".');
 				},
 		},
 },
+validateRepeats: false,  // (default: false)
 ```
+
+In `options` one can set the value of `validateRepeats` to determines whether successive identical values are validated. Deals with the issue of validation firing on change and then for the server updates.
 
 Recall that in the previous section, the following example was described:
 
@@ -1076,7 +1142,9 @@ Extra processors may be accessed via the `ThreeWay.preProcessors` namespace (e.g
  - `isNonEmptyArray`: returns the described true/false value
  - `toUpperCase`: transforms the value to a string (`undefined` to `''`) and returns it in upper case
  - `toLowerCase`: transforms the value to a string (`undefined` to `''`) and returns it in lower case
- - `updateSemanticUIDropdown`: does the necessary calls that enable the use of [Semantic UI dropdowns](http://semantic-ui.com/modules/dropdown.html)
+ - `updateSemanticUIDropdown`: does the necessary calls that enable the use of [Semantic UI dropdowns](http://semantic-ui.com/modules/dropdown.html); uses `.dropdown("set exactly", ...)` that triggers value changes and may lead to unnecessary updates
+ - `updateSemanticUIDropdownSingle`: does the necessary calls that enable the use of [Semantic UI dropdowns](http://semantic-ui.com/modules/dropdown.html); uses direct DOM manipulation; value changes not triggered
+ - `updateSemanticUIDropdownMultiple`: does the necessary calls that enable the use of [Semantic UI dropdowns](http://semantic-ui.com/modules/dropdown.html) multiple drop down; uses direct DOM manipulation; value changes not triggered
  - `undefinedToEmptyStringFilter`: maps `undefined`'s to empty strings and passes other values
 
 ### Extra Pre-Processor Generators
