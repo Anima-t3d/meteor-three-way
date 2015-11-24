@@ -686,11 +686,11 @@ Such bindings include `html`, `visible`, `disabled`, as well as the `class`, `st
 
 Helpers are called with `this` bound to template instance, and `Template.instance()` is also accessible. (Note: Be careful of lexically scoped arrow functions that overrides `call`/`apply`/`bind`.)
 
-It is useful to highlight `_3w_haveData`, which is automatically added to the set of template helpers.
+It is useful to highlight `_3w_hasData`, which is automatically added to the set of template helpers.
 
 ```html
-<div data-bind="visible: _3w_haveData">...</div>
-<button data-bind="disabled: _3w_haveData">...</button>
+<div data-bind="visible: _3w_hasData">...</div>
+<button data-bind="disabled: _3w_hasData">...</button>
 ```
 
 One might find it to be particularly useful.
@@ -881,7 +881,7 @@ The following methods are crammed onto each template instance in an `onCreated` 
 
  - `_3w_id`: returns the `_id` of the document selected (if any)
 
- - `_3w_haveData`: returns a boolean indicating whether the view model has data yet
+ - `_3w_hasData`: returns a boolean indicating whether the view model has data yet
 
  - `_3w_get`: See [previous section](#instance-methods).
 
@@ -1008,11 +1008,11 @@ Recall that in the previous section, the following example was described:
 
 The validation flow is as follows:
 
-		1. a change is made in the view which propagates to the view model
-		2. validation starts
-		3. view-model level validation using data in the view model and success/failure call-backs fire
-		4. if the view-model level check does not fail, server validation is run and success/failure call-backs fire
-		5. the overall result is returned
+	1. a change is made in the view which propagates to the view model
+	2. validation starts
+	3. view-model level validation using data in the view model and success/failure call-backs fire
+	4. if the view-model level check does not fail, server validation is run and success/failure call-backs fire
+	5. the overall result is returned
 
 If the change is a candidate for a database update (e.g.: the value is not the same as the previous known value in the database), then validity is used as a requirement for an update. (As is common sense.)
 
@@ -1081,7 +1081,7 @@ Extra processors may be accessed via the `ThreeWay.preProcessors` namespace (e.g
 
 ### Extra Pre-Processor Generators
 
-Similar to the above, but these are generators for a pre-processor. Takes one or more parameters and return a pre-processor. They may be accessed via the `ThreeWay.preProcessorGenerators` namespace (e.g.: `ThreeWay.preProcessorGenerators.undefinedFilterGenerator`).
+Similar to the above, but these are generators for pre-processors: they each accept one or more arguments and return a pre-processor. They may be accessed via the `ThreeWay.preProcessorGenerators` namespace (e.g.: `ThreeWay.preProcessorGenerators.undefinedFilterGenerator`).
 
 - `undefinedFilterGenerator(defaultValue)`: a function that returns a function that maps `undefined`'s to `defaultValue` and passes other values
 - `makeMap(map, defaultValue)`: a function that maps `k` to `map[k]` (and returns `defaultValue` if `map` does not have property `k`)

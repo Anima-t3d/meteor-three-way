@@ -155,6 +155,13 @@ function clearReactiveDictSafely(rd) {
 	});
 }
 
+// Created to extricate event handlers that flush from computations
+function pushToEndOfEventQueue(fn, context) {
+	return function fnAtBackOfEventQueue(...params) {
+		setTimeout(() => fn.apply(context, params), 0);
+	};
+}
+
 
 if (Meteor.isClient) {
 	PackageUtilities.addImmutablePropertyArray(ThreeWay, 'DEBUG_MESSAGE_HEADINGS', _.map(DEBUG_MESSAGES, (v, k) => k));
@@ -345,6 +352,7 @@ if (Meteor.isClient) {
 			var instance = this;
 
 			var threeWay = {
+				options: options,
 				instanceId: new ReactiveVar(null),
 				children: {},
 				__hasChild: new ReactiveDict(),
@@ -935,7 +943,10 @@ if (Meteor.isClient) {
 				(function() {
 					threeWay._focusedField.set(null);
 					var elem = document.activeElement;
-					$(elem).trigger('focus');
+					pushToEndOfEventQueue(function forceFocusActiveElementJustInCase() {
+						// Don't trigger synchronously to avoid flushes in a flush/computation
+						$(elem).trigger('focus');
+					}, instance);					
 				})();
 
 				// Replace ViewModel only data and set-up mirroring again
@@ -1198,7 +1209,7 @@ if (Meteor.isClient) {
 			threeWay.fieldMatchParamsForValidationServer = {};
 			var validatorFieldsVM = _.map(options.validatorsVM, (v, k) => k);
 			var validatorFieldsServer = _.map(options.validatorsServer, (v, k) => k);
-			threeWay.validateInput = function vmValidate(field, value, validateForServer) {
+			threeWay.validateInput = function validateVMThenServer(field, value, validateForServer) {
 				if (typeof validateForServer === "undefined") {
 					validateForServer = true;
 				}
@@ -1236,7 +1247,7 @@ if (Meteor.isClient) {
 					console.log('[validation] Doing validation... Field: ' + field + '; Value:', value, '; Validation Info (VM):', threeWay.fieldMatchParamsForValidationVM[field], '; Validation Info (Server):', threeWay.fieldMatchParamsForValidationServer[field]);
 				}
 
-				var vmData;
+				var vmData = _.extend({}, threeWay.dataMirror);
 
 				var matchFamily = threeWay.fieldMatchParams[field] && threeWay.fieldMatchParams[field].match || null;
 
@@ -1252,7 +1263,6 @@ if (Meteor.isClient) {
 				var passed = true;
 				var validator, successCB, failureCB;
 				if (useValidatorForVM) {
-					vmData = _.extend({}, threeWay.dataMirror);
 					validator = !!options.validatorsVM[matchFamilyVM].validator ? options.validatorsVM[matchFamilyVM].validator : () => true;
 					successCB = !!options.validatorsVM[matchFamilyVM].success ? options.validatorsVM[matchFamilyVM].success : function() {};
 					failureCB = !!options.validatorsVM[matchFamilyVM].failure ? options.validatorsVM[matchFamilyVM].failure : function() {};
@@ -1355,6 +1365,11 @@ if (Meteor.isClient) {
 					}
 				});
 				Template._currentTemplateInstanceFunc = currTemplateInstanceFunc;
+
+				if (!processorsMutateValue && (mappings.length > 0)  && (value.length === 1)) {
+					// if single valued and mappings do not mutate value, "unbox"
+					value = value[0];
+				}
 
 				return value;
 			};
@@ -1581,12 +1596,12 @@ if (Meteor.isClient) {
 						}
 					});
 
-					// Bind change handler	
+					// Bind change handler
 					bindEventToThisElem('change', valueChangeHandler);
 					if (!_.filter(elemBindings.bindings.value.itemOptions, (v, opt) => (opt === 'donotupdateon') && (v === 'input')).length) {
 						// if not prevented from changing on input
-						bindEventToThisElem('input', function() {
-							$(this).trigger('change');
+						bindEventToThisElem('input', function changeTriggeredByInput() {
+							$(elem).trigger('change');
 						});
 					}
 
@@ -1596,8 +1611,8 @@ if (Meteor.isClient) {
 							if (IN_DEBUG_MODE_FOR('value')) {
 								console.log("[.value] Binding with option " + opt + "=" + v + " for", elem);
 							}
-							bindEventToThisElem(v, function() {
-								$(this).trigger('change');
+							bindEventToThisElem(v, function changeTriggeredByOtherEvent() {
+								$(elem).trigger('change');
 							});
 						}
 					});
@@ -1745,8 +1760,8 @@ if (Meteor.isClient) {
 							if (IN_DEBUG_MODE_FOR('checked')) {
 								console.log("[.checked] Binding with option " + opt + "=" + v + " for", elem);
 							}
-							bindEventToThisElem(v, function() {
-								$(this).trigger('change');
+							bindEventToThisElem(v, function changeTriggeredByOtherEvent() {
+								$(elem).trigger('change');
 							});
 						}
 					});
