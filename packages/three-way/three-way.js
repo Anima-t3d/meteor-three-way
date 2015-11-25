@@ -253,7 +253,7 @@ if (Meteor.isClient) {
 			validateRepeats: false,
 		}, options);
 
-		if (!(options.collection instanceof Mongo.Collection) && !(typeof options.collection === "string") && (options.collection !== null)) {
+		if (!((options.collection instanceof Mongo.Collection) || (typeof options.collection === "string") || (options.collection === null))) {
 			throw new Meteor.Error('options-error', 'collection should be a Mongo.Collection or a string with naming the collection, or null');
 		}
 		options.fields = _.map(options.updatersForServer, (v, k) => k);
@@ -416,12 +416,18 @@ if (Meteor.isClient) {
 				threeWay.data.set(p, v);
 				updateRelatedFields(p, v);
 			};
-			threeWayMethods.get_NR = p => threeWay.dataMirror[p];
+			threeWayMethods.get_NR = function(p) {
+				var ret;
+				Tracker.nonreactive(function() {
+					ret = threeWayMethods.get(p);
+				});
+				return ret;
+			};
 			threeWayMethods.getAll = () => threeWay.data.all();
 			threeWayMethods.getAll_NR = function() {
 				var ret;
 				Tracker.nonreactive(function() {
-					ret = threeWay.data.all();
+					ret = threeWayMethods.getAll();
 				});
 				return ret;
 			};
@@ -435,11 +441,11 @@ if (Meteor.isClient) {
 			};
 			threeWayMethods.isNotInvalid = p => !!threeWay.__dataIsNotInvalid.get(p);
 
-			threeWayMethods.parentDataGet = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.get(p);
-			threeWayMethods.parentDataGetAll = (levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.all();
-			threeWayMethods.parentDataSet = (p, v, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].data.set(p, v);
-			threeWayMethods.parentDataGet_NR = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].dataMirror[p];
-			threeWayMethods.parentDataGetAll_NR = (levelsUp) => _.extend({}, instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE].dataMirror);
+			threeWayMethods.parentDataGet = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE_METHODS].get(p);
+			threeWayMethods.parentDataGetAll = (levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE_METHODS].getAll();
+			threeWayMethods.parentDataSet = (p, v, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE_METHODS].set(p, v);
+			threeWayMethods.parentDataGet_NR = (p, levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE_METHODS].get_NR(p);
+			threeWayMethods.parentDataGetAll_NR = (levelsUp) => instance.parentTemplate((!!levelsUp) ? levelsUp : 1)[THREE_WAY_NAMESPACE_METHODS].getAll_NR();
 
 			threeWayMethods.childDataGetId = function _3w_childDataGetId(childNameArray) {
 				if (childNameArray instanceof Array) {
@@ -705,6 +711,27 @@ if (Meteor.isClient) {
 					threeWay.data.set(match.fieldPath, parentValue);
 					threeWay.__updatesToSkipDueToRelatedObjectUpdate[match.fieldPath] = true;
 				});
+			}
+
+
+			function updateServerUpdatedStatus(fieldName) {
+				if (!!threeWay.fieldMatchParams[fieldName]) {
+					// invalidate only if linked to server
+					// ... and different
+					var isUpdated;
+					Tracker.nonreactive(function() {
+						// get current value by digging into document
+						var doc = threeWay.collection.findOne(threeWay.id.get());
+						var miniMongoValue = doc;
+						var fieldNameSplit = fieldName.split('.');
+						while (fieldNameSplit.length > 0) {
+							miniMongoValue = miniMongoValue[fieldNameSplit.shift()];
+						}
+						var miniMongoValueTransformed = options.dataTransformFromServer[threeWay.fieldMatchParams[fieldName].match](miniMongoValue, doc);
+						isUpdated = _.isEqual(miniMongoValueTransformed, threeWayMethods.get(fieldName));
+					});
+					threeWay.__serverIsUpdated.set(fieldName, isUpdated);
+				}				
 			}
 
 
@@ -1096,14 +1123,15 @@ if (Meteor.isClient) {
 
 					//////////////////////////////////////////////////// 
 					// getFieldsWhereDefaultRequired: for figuring out if a default field is warranted 
-					var getFieldsWhereDefaultRequired = function getFieldsWhereDefaultRequired(f, dataMirror) {
+					var getFieldsWhereDefaultRequired = function getFieldsWhereDefaultRequired(f) {
+						var vmData = threeWayMethods.getAll_NR();
 						if (f.indexOf("*") === -1) {
-							return !dataMirror.hasOwnProperty(f) ? [f] : [];
+							return !vmData.hasOwnProperty(f) ? [f] : [];
 						}
 						var f_split = f.split(".");
 						var f_last = f_split.pop();
 						var matches = [];
-						_.forEach(dataMirror, function(v_dm, f_dm) {
+						_.forEach(vmData, function(v_dm, f_dm) {
 							var f_dm_split = f_dm.split(".");
 							if (f_split.length + 1 > f_dm_split.length) {
 								// length mismatch => cannot be a match
@@ -1126,7 +1154,7 @@ if (Meteor.isClient) {
 								}
 							}
 							var new_field = f_dm_split.join('.') + '.' + f_last;
-							if (!dataMirror.hasOwnProperty(new_field) && (matches.indexOf(new_field) === -1)) {
+							if (!vmData.hasOwnProperty(new_field) && (matches.indexOf(new_field) === -1)) {
 								matches.push(new_field);
 							}
 						});
@@ -1137,6 +1165,19 @@ if (Meteor.isClient) {
 
 
 					// Setting Up Observers
+					var injectDefaultValues = function injectDefaultValues() {
+						// Inject default fields
+						_.forEach(options.injectDefaultValues, function(v, f) {
+							getFieldsWhereDefaultRequired(f).forEach(function(new_f) {
+								if (IN_DEBUG_MODE_FOR('default-values')) {
+									console.log("[default-values] Injecting " + new_f + " with value:", v);
+								}
+								doFieldMatch(new_f);
+								setUpBinding(new_f);
+								threeWay.data.set(new_f, v);
+							});
+						});
+					};
 					threeWay.observer = cursor.observeChanges({
 						added: function(id, fields) {
 							var doc = threeWay.collection.findOne(id, {
@@ -1148,23 +1189,7 @@ if (Meteor.isClient) {
 							threeWay.hasData.set(true);
 							threeWay.__idReady = true;
 							descendInto(fields, doc, true);
-
-							// Inject default fields
-							var _dataMirror; // In case threeWay.dataMirror is not updated.
-							// A flush is required for that, but can't be done now
-							Tracker.nonreactive(function() {
-								_dataMirror = threeWay.data.all();
-							});
-							_.forEach(options.injectDefaultValues, function(v, f) {
-								getFieldsWhereDefaultRequired(f, _dataMirror).forEach(function(new_f) {
-									if (IN_DEBUG_MODE_FOR('default-values')) {
-										console.log("[default-values] Injecting " + new_f + " with value:", v);
-									}
-									doFieldMatch(new_f);
-									setUpBinding(new_f);
-									threeWay.data.set(new_f, v);
-								});
-							});
+							injectDefaultValues();
 						},
 						changed: function(id, fields) {
 							var doc = threeWay.collection.findOne(id, {
@@ -1174,23 +1199,7 @@ if (Meteor.isClient) {
 								console.log('[Observer] Changed:', id, fields, doc);
 							}
 							descendInto(fields, doc, false);
-
-							// Inject default fields
-							var _dataMirror; // In case threeWay.dataMirror is not updated.
-							// A flush is required for that, but can't be done now
-							Tracker.nonreactive(function() {
-								_dataMirror = threeWay.data.all();
-							});
-							_.forEach(options.injectDefaultValues, function(v, f) {
-								getFieldsWhereDefaultRequired(f, _dataMirror).forEach(function(new_f) {
-									if (IN_DEBUG_MODE_FOR('default-values')) {
-										console.log("[default-values] Injecting " + new_f + " with value:", v);
-									}
-									doFieldMatch(new_f);
-									setUpBinding(new_f);
-									threeWay.data.set(new_f, v);
-								});
-							});
+							injectDefaultValues();
 						},
 						removed: function(id) {
 							if (IN_DEBUG_MODE_FOR('observer')) {
@@ -1342,7 +1351,7 @@ if (Meteor.isClient) {
 			////////////////////////////////////////////////////////////
 
 			// Call helpers and pre-processors in template context
-			var processInTemplateContext = function processInTemplateContext(source, mappings, elem, computation, useHelpers, processorsMutateValue, additionalFailureCondition) {
+			var processInTemplateContext = function processInTemplateContext(source, mappings, elem, useHelpers, processorsMutateValue, additionalFailureCondition) {
 				var thisTemplate = instance.view.template;
 
 				if (typeof useHelpers === "undefined") {
@@ -1436,6 +1445,8 @@ if (Meteor.isClient) {
 
 				return value;
 			};
+			threeWayMethods.__processInTemplateContext = processInTemplateContext;
+			
 
 			////////////////////////////////////////////////////////////////
 			////////////////////////////////////////////////////////////////
@@ -1598,7 +1609,7 @@ if (Meteor.isClient) {
 						var value = $(elem).val();
 						var pipelineSplit = elemBindings.bindings.value.source.split('|').map(x => x.trim()).filter(x => x !== "");
 						var fieldName = pipelineSplit[0];
-						var curr_value = threeWay.dataMirror[fieldName];
+						var curr_value = threeWayMethods.get(fieldName);
 
 						if (IN_DEBUG_MODE_FOR('value')) {
 							console.log('[.value] Change', elem);
@@ -1616,25 +1627,7 @@ if (Meteor.isClient) {
 								}
 								threeWay.data.set(fieldName, value);
 								updateRelatedFields(fieldName, value);
-								Tracker.flush();
-
-								if (!!threeWay.fieldMatchParams[fieldName]) {
-									// invalidate only if linked to server
-									// ... and different
-									var isUpdated;
-									Tracker.nonreactive(function() {
-										// get current value by digging into document
-										var doc = threeWay.collection.findOne(threeWay.id.get());
-										var currValue = doc;
-										var fieldNameSplit = fieldName.split('.');
-										while (fieldNameSplit.length > 0) {
-											currValue = currValue[fieldNameSplit.shift()];
-										}
-										currValue = options.dataTransformFromServer[threeWay.fieldMatchParams[fieldName].match](currValue, doc);
-										isUpdated = _.isEqual(currValue, threeWay.dataMirror[fieldName]);
-									});
-									threeWay.__serverIsUpdated.set(fieldName, isUpdated);
-								}
+								updateServerUpdatedStatus(fieldName);
 							} else {
 								if (IN_DEBUG_MODE_FOR('value')) {
 									console.log('[.value] Unchanged value: ' + fieldName + ';', curr_value, '(in mirror)');
@@ -1692,7 +1685,7 @@ if (Meteor.isClient) {
 						}
 
 						elemGlobals.suppressChangesToSSOT = true;
-						var value = processInTemplateContext(source, pipeline, elem, c, false, false);
+						var value = processInTemplateContext(source, pipeline, elem, false, false);
 						// (..., false, false): helpers not used and pipelines do not manipulate value
 
 						// Validate here
@@ -1736,7 +1729,7 @@ if (Meteor.isClient) {
 						var elem_checked = elem.checked;
 
 						var fieldName = elemBindings.bindings.checked.source;
-						var curr_value = threeWay.dataMirror[fieldName];
+						var curr_value = threeWayMethods.get(fieldName);
 
 						var new_value;
 						var isRadio = elem.getAttribute('type').toLowerCase() === "radio";
@@ -1771,25 +1764,7 @@ if (Meteor.isClient) {
 								}
 								threeWay.data.set(fieldName, new_value);
 								updateRelatedFields(fieldName, new_value);
-								Tracker.flush();
-
-								if (!!threeWay.fieldMatchParams[fieldName]) {
-									// invalidate only if linked to server
-									// ... and different
-									var isUpdated;
-									Tracker.nonreactive(function() {
-										// get current value by digging into document
-										var doc = threeWay.collection.findOne(threeWay.id.get());
-										var currValue = doc;
-										var fieldNameSplit = fieldName.split('.');
-										while (fieldNameSplit.length > 0) {
-											currValue = currValue[fieldNameSplit.shift()];
-										}
-										currValue = options.dataTransformFromServer[threeWay.fieldMatchParams[fieldName].match](currValue, doc);
-										isUpdated = _.isEqual(currValue, threeWay.dataMirror[fieldName]);
-									});
-									threeWay.__serverIsUpdated.set(fieldName, isUpdated);
-								}
+								updateServerUpdatedStatus(fieldName);
 							} else {
 								if (IN_DEBUG_MODE_FOR('checked')) {
 									console.log('[.checked] Unchanged value: ' + fieldName + ';', curr_value, '(in mirror)');
@@ -1842,7 +1817,7 @@ if (Meteor.isClient) {
 
 						elemGlobals.suppressChangesToSSOT = true;
 						var additionalFailureCondition = (elem.getAttribute('type').toLowerCase() === "radio") ? () => false : v => (typeof v !== "object") || (!(v instanceof Array));
-						var value = processInTemplateContext(source, pipeline, elem, c, false, false, additionalFailureCondition);
+						var value = processInTemplateContext(source, pipeline, elem, false, false, additionalFailureCondition);
 						// (..., false, false): helpers not used and pipelines do not manipulate value
 
 						// Validate here
@@ -1941,7 +1916,7 @@ if (Meteor.isClient) {
 						var focus = elem === document.activeElement;
 						var pipelineSplit = elemBindings.bindings.focus.source.split('|').map(x => x.trim()).filter(x => x !== "");
 						var fieldName = pipelineSplit[0];
-						var curr_value = !!threeWay.dataMirror[fieldName];
+						var curr_value = !!threeWayMethods.get(fieldName);
 
 						if (IN_DEBUG_MODE_FOR('focus')) {
 							console.log('[.focus] Focus Change', elem);
@@ -1959,25 +1934,7 @@ if (Meteor.isClient) {
 								}
 								threeWay.data.set(fieldName, focus);
 								updateRelatedFields(fieldName, focus);
-								Tracker.flush();
-
-								if (!!threeWay.fieldMatchParams[fieldName]) {
-									// invalidate only if linked to server
-									// ... and different
-									var isUpdated;
-									Tracker.nonreactive(function() {
-										// get current value by digging into document
-										var doc = threeWay.collection.findOne(threeWay.id.get());
-										var currValue = doc;
-										var fieldNameSplit = fieldName.split('.');
-										while (fieldNameSplit.length > 0) {
-											currValue = currValue[fieldNameSplit.shift()];
-										}
-										currValue = options.dataTransformFromServer[threeWay.fieldMatchParams[fieldName].match](currValue, doc);
-										isUpdated = _.isEqual(currValue, threeWay.dataMirror[fieldName]);
-									});
-									threeWay.__serverIsUpdated.set(fieldName, isUpdated);
-								}
+								updateServerUpdatedStatus(fieldName);
 							} else {
 								if (IN_DEBUG_MODE_FOR('focus')) {
 									console.log('[.focus] Unchanged focus: ' + fieldName + ';', curr_value, '(in mirror)');
@@ -2001,7 +1958,7 @@ if (Meteor.isClient) {
 						}
 
 						elemGlobals.suppressChangesToSSOT = true;
-						var focus = !!processInTemplateContext(source, pipeline, elem, c, false, false);
+						var focus = !!processInTemplateContext(source, pipeline, elem, false, false);
 						// (..., false, false): helpers not used and pipelines do not manipulate value
 
 						// Validate here
@@ -2045,7 +2002,7 @@ if (Meteor.isClient) {
 							}
 						}
 
-						var html = processInTemplateContext(source, mappings, elem, c);
+						var html = processInTemplateContext(source, mappings, elem);
 
 						if (elem.innerHTML !== html) {
 							if (IN_DEBUG_MODE_FOR('html-text')) {
@@ -2073,7 +2030,7 @@ if (Meteor.isClient) {
 							}
 						}
 
-						var text = processInTemplateContext(source, mappings, elem, c);
+						var text = processInTemplateContext(source, mappings, elem);
 
 						if ($(elem).text() !== text) {
 							if (IN_DEBUG_MODE_FOR('html-text')) {
@@ -2100,7 +2057,7 @@ if (Meteor.isClient) {
 							}
 						}
 
-						var visible = processInTemplateContext(source, mappings, elem, c);
+						var visible = processInTemplateContext(source, mappings, elem);
 						visible = (!!visible) ? "" : "none";
 
 						if (elem.style.display !== visible) {
@@ -2128,7 +2085,7 @@ if (Meteor.isClient) {
 							}
 						}
 
-						var disabled = processInTemplateContext(source, mappings, elem, c);
+						var disabled = processInTemplateContext(source, mappings, elem);
 						disabled = (!!disabled);
 
 						if (elem.disabled !== disabled) {
@@ -2158,7 +2115,7 @@ if (Meteor.isClient) {
 								}
 							}
 
-							var value = processInTemplateContext(source, mappings, elem, c);
+							var value = processInTemplateContext(source, mappings, elem);
 
 							// Update Style
 							if (elem.style[key] !== value) {
@@ -2189,7 +2146,7 @@ if (Meteor.isClient) {
 								}
 							}
 
-							var value = processInTemplateContext(source, mappings, elem, c);
+							var value = processInTemplateContext(source, mappings, elem);
 
 							// Update Style
 							if ($(elem).attr(key) !== value) {
@@ -2220,7 +2177,7 @@ if (Meteor.isClient) {
 								}
 							}
 
-							var value = processInTemplateContext(source, mappings, elem, c);
+							var value = processInTemplateContext(source, mappings, elem);
 							value = (!!value);
 
 							// Update Style
@@ -2373,8 +2330,10 @@ if (Meteor.isClient) {
 				var thisTemplate = instance && instance.view && instance.view.template;
 				if (!!thisTemplate && !!thisTemplate.__helpers) {
 					if (!thisTemplate.__helpers.has(h)) {
-						thisTemplate.helpers(_.object([[h, fn]]));
-					};
+						thisTemplate.helpers(_.object([
+							[h, fn]
+						]));
+					}
 				}
 			});
 		});
@@ -2700,6 +2659,13 @@ if (Meteor.isClient) {
 			_3w_get: (propName) => Template.instance()[THREE_WAY_NAMESPACE_METHODS].get(propName),
 			_3w_getAll: () => Template.instance()[THREE_WAY_NAMESPACE_METHODS].getAll(),
 
+			_3w_display: function _3w_display(displayDescription) {
+				var pipelineSplit = displayDescription.split('|').map(x => x.trim()).filter(x => x !== "");
+				var source = pipelineSplit[0];
+				var mappings = pipelineSplit.splice(1);
+				return Template.instance()[THREE_WAY_NAMESPACE_METHODS].__processInTemplateContext(source, mappings, null);
+			},
+
 			_3w_focusedField: () => Template.instance()[THREE_WAY_NAMESPACE_METHODS].focusedField(),
 			_3w_focusedFieldUpdatedOnServer: p => Template.instance()[THREE_WAY_NAMESPACE_METHODS].focusedFieldUpdatedOnServer(p),
 
@@ -2745,70 +2711,7 @@ if (Meteor.isClient) {
 		toLowerCase: x => ((typeof x === "undefined") || (x === null)) ? "" : x.toString().toLowerCase(),
 		updateSemanticUIDropdown: function updateSemanticUIDropdown(x, elem) {
 			if ((typeof x !== "undefined") && (x !== null)) {
-				if (x.toString().trim() === "") {
-					$(elem.parentElement)
-						.dropdown('set exactly', []);
-				} else {
-					$(elem.parentElement)
-						.dropdown('set exactly', x.toString().split(',').map(x => x.trim()));
-				}
-			}
-			$(elem.parentElement)
-				.dropdown('refresh');
-			return x;
-		},
-		updateSemanticUIDropdownMultiple: function updateSemanticUIDropdownMultiple(x, elem) {
-			if ((typeof x !== "undefined") && (x !== null)) {
 
-				// check for correct element
-				var validElement = !!elem && !!elem.parentElement && !!elem.parentElement.tagName && (elem.parentElement.tagName.toUpperCase() === "DIV");
-				var parentElementClassList;
-				if (validElement) {
-					parentElementClassList = Array.prototype.map.call(elem.parentElement.classList, x => x.toLowerCase());
-					['ui', 'dropdown', 'multiple'].forEach(function(tag) {
-						if (parentElementClassList.indexOf(tag) === -1) {
-							validElement = false;
-						}
-					});
-				}
-				if (!validElement) {
-					console.warn('Unable to find Semantic UI multiple dropdown element.', elem, elem.parentElement);
-					return x;
-				}
-
-				var dropdown = $(elem.parentElement);
-				var selection = (x.toString().trim() === "") ? [] : x.toString().trim().split(',').map(x => x.trim());
-				var theIcon = dropdown.find('i.dropdown.icon');
-
-				// Remove labels
-				dropdown.find('a.ui.label').remove();
-
-				// Reset selection status
-				dropdown.find('div.item').removeClass("selected active filtered");
-
-				var items = "";
-				var genLabel = (id, label) => "<a class=\"ui label transition visible\" data-value=\"" + id + "\" style=\"display: inline-block !important;\">" + label + "<i class=\"delete icon\"></i></a>\n";
-				var selectedItems = selection.map(id => [id, Array.prototype.filter.call(dropdown.find('div.item'), elem => ((elem.getAttribute('data-value') || "").trim() === id))]);
-				selectedItems.forEach(function(item) {
-					var id = item[0];
-					var elems = item[1];
-					elems.forEach(function(elem) {
-						// Set selection status
-						$(elem).addClass("active filtered");
-						// Prepare to create labels
-						items += genLabel(id, elem.innerText);
-					});
-				});
-
-				// Create labels
-				theIcon.after(items);
-			}
-			$(elem.parentElement)
-				.dropdown('refresh');
-			return x;
-		},
-		updateSemanticUIDropdownSingle: function updateSemanticUIDropdownSingle(x, elem) {
-			if ((typeof x !== "undefined") && (x !== null)) {
 				// check for correct element
 				var validElement = !!elem && !!elem.parentElement && !!elem.parentElement.tagName && (elem.parentElement.tagName.toUpperCase() === "DIV");
 				var parentElementClassList;
@@ -2819,37 +2722,73 @@ if (Meteor.isClient) {
 							validElement = false;
 						}
 					});
-					if (parentElementClassList.indexOf('multiple') !== -1) {
-						// not a single dropdown
-						validElement = false;
-					}
 				}
 				if (!validElement) {
-					console.warn('Unable to find Semantic UI (single) dropdown element.', elem, elem.parentElement);
+					console.warn('Unable to find Semantic UI dropdown element.', elem, elem.parentElement);
 					return x;
 				}
 
-				var selectedItem = x.toString().trim();
+				var isMultipleSelectDropdown = parentElementClassList.indexOf('multiple') !== -1;
 				var dropdown = $(elem.parentElement);
+				var dropdownObject = $(elem.parentElement).dropdown('get');
+				var selectedItems;
 
-				// Reset selection status
-				dropdown.find('div.item').removeClass("selected active");
+				if (isMultipleSelectDropdown) {
+					// Multi-select dropdown
+					var selection = (x.toString().trim() === "") ? [] : x.toString().trim().split(',').map(x => x.trim());
+					var theIcon = dropdown.find('i.dropdown.icon');
+					// Remove labels
+					dropdown.find('a.ui.label').remove();
+					// Reset selection status
+					dropdown.find('div.item').removeClass("selected active filtered");
+					var items = "";
+					var genLabel = (id, label) => "<a class=\"ui label transition visible\" data-value=\"" + id + "\" style=\"display: inline-block !important;\">" + label + "<i class=\"delete icon\"></i></a>\n";
+					selectedItems = selection.map(id => [id, Array.prototype.filter.call(dropdown.find('div.item'), elem => ((elem.getAttribute('data-value') || "").trim() === id))]);
+					selectedItems.forEach(function(item) {
+						var id = item[0];
+						var elems = item[1];
+						elems.forEach(function(elem) {
+							// Set selection status
+							$(elem).addClass("active filtered");
+							// Prepare to create labels
+							items += genLabel(id, elem.getAttribute('data-text') || elem.innerText);
+						});
 
-				var textValue;
-				var selectedItems = Array.prototype.filter.call(dropdown.find('div.item'), elem => ((elem.getAttribute('data-value') || "").trim() === selectedItem));
-				selectedItems.forEach(function(elem) {
-					// Set selection status
-					$(elem).addClass("selected active");
-					// Get label text
-					textValue = elem.innerText;
-				});
-
-				// Update value
-				if (!!textValue) {
-					dropdown
-						.find('div.text')
-						.removeClass('default')
-						.text(textValue);
+						if (elems.length === 0) {
+							if ((!!dropdownObject.userValues()) && (dropdownObject.userValues().indexOf(id) !== -1)) {
+								items += genLabel(id, id);
+							}
+						}
+					});
+					// Create labels
+					theIcon.after(items);
+				} else {
+					// Single selection dropdown
+					var selectedItem = x.toString().trim();
+					// Reset selection status
+					dropdown.find('div.item').removeClass("selected active");
+					var textValue;
+					selectedItems = Array.prototype.filter.call(dropdown.find('div.item'), elem => ((elem.getAttribute('data-value') || "").trim() === selectedItem));
+					selectedItems.forEach(function(elem) {
+						// Set selection status
+						$(elem).addClass("selected active");
+						// Get label text
+						textValue = elem.innerText;
+					});
+					// Update value
+					if (!!textValue) {
+						dropdown
+							.find('div.text')
+							.removeClass('default')
+							.text(textValue);
+					} else {
+						if (!!dropdownObject.defaultText()) {
+							dropdown
+								.find('div.text')
+								.addClass('default')
+								.text(dropdownObject.defaultText());
+						}
+					}
 				}
 			}
 			$(elem.parentElement)

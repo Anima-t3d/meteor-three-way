@@ -223,12 +223,14 @@
 							<strong>Tags</strong>
 							<br>
 							(Valid tags begin with "tag")
+							<br>
+							(... also, Semantic UI dropdowns don't play well with focus)
 						</td>
 						<td style="color: #440;" data-bind="style: {background-color: tagsValidationErrorText|trueIfNonEmpty|grayIfTrue}">
 							<table border=0 style="width: 100%;">
 								<tr>
 									<td style="width: 85%; border: none;">
-										<div class="ui fluid multiple search selection dropdown" data-bind="value: tags" tabindex=0><!-- data binding has no effect, but the binding and tabindex allow the _3w_focusedField to work -->
+										<div class="ui fluid multiple search selection dropdown">
 											<input name="tags" type="hidden" data-bind="value: tags|updateSemanticUIDropdown">
 											<i class="dropdown icon"></i>
 											<div class="default text">Select Tags</div>
@@ -324,13 +326,13 @@
 					<pre>$("input[name='personal.someArr.2']").attr('data-bind', 'value: personal.someArr.0')</pre>
 					<p>should link "#2" of the <code>personal.someArr</code> data-entry row with the value of "#0"...</p>
 					<p>Alternatively, try adding a nodes below like so:</p>
-	<pre>
-	$(&#039;#below-me&#039;).append(&#039;&lt;h3&gt;Multivariable Display Binding: &lt;code&gt;(R, G, B)&lt;/code&gt; to &lt;code&gt;background-color&lt;/code&gt;&lt;/h3&gt;&#039;);
-	$(&#039;#below-me&#039;).append(&#039;&lt;input data-bind=&quot;value: personal.someArr.0&quot; type=&quot;range&quot; style=&quot;width: 100%&quot; max=255 min=0&gt;&#039;);
-	$(&#039;#below-me&#039;).append(&#039;&lt;input data-bind=&quot;value: personal.someArr.1&quot; type=&quot;range&quot; style=&quot;width: 100%&quot; max=255 min=0&gt;&#039;);
-	$(&#039;#below-me&#039;).append(&#039;&lt;input data-bind=&quot;value: personal.someArr.2&quot; type=&quot;range&quot; style=&quot;width: 100%&quot; max=255 min=0&gt;&#039;);
-	$(&#039;#below-me&#039;).attr(&#039;data-bind&#039;, &#039;style: {background-color: personal.someArr.0#personal.someArr.1#personal.someArr.2|makeRGB}&#039;);
-	</pre>
+<pre>
+$(&#039;#below-me&#039;).append(&#039;&lt;h3&gt;Multivariable Display Binding: &lt;code&gt;(R, G, B)&lt;/code&gt; to &lt;code&gt;background-color&lt;/code&gt;&lt;/h3&gt;&#039;);
+$(&#039;#below-me&#039;).append(&#039;&lt;input data-bind=&quot;value: personal.someArr.0&quot; type=&quot;range&quot; style=&quot;width: 100%&quot; max=255 min=0&gt;&#039;);
+$(&#039;#below-me&#039;).append(&#039;&lt;input data-bind=&quot;value: personal.someArr.1&quot; type=&quot;range&quot; style=&quot;width: 100%&quot; max=255 min=0&gt;&#039;);
+$(&#039;#below-me&#039;).append(&#039;&lt;input data-bind=&quot;value: personal.someArr.2&quot; type=&quot;range&quot; style=&quot;width: 100%&quot; max=255 min=0&gt;&#039;);
+$(&#039;#below-me&#039;).attr(&#039;data-bind&#039;, &#039;style: {background-color: personal.someArr.0#personal.someArr.1#personal.someArr.2|makeRGB}&#039;);
+</pre>
 				</div>
 
 				<div id="below-me" style="text-align: center; padding: 20px; border-radius: 5px;">
@@ -357,7 +359,7 @@
 					</tr>
 					<tr>
 						<td><strong>e-mail Preferences</strong> (bold if more than one)</td>
-						<td><span data-bind="html: emailPrefs|mapToEmailPrefs|boldIfMoreThanOne"></span></td>
+						<td>{{{_3w_display 'emailPrefs|mapToEmailPrefs|boldIfMoreThanOne'}}}</td>
 					</tr>
 					<tr>
 						<td><strong>Age</strong> (color coded)</td>
@@ -369,7 +371,7 @@
 					</tr>
 					<tr>
 						<td><strong>Tags</strong></td>
-						<td><span data-bind="html: tags|tagsTextDisplay"></span></td>
+						<td>{{_3w_display 'tags|tagsTextDisplay'}}</td>
 					</tr>
 					<tr>
 						<td><strong>personal.someArr</strong></td>
