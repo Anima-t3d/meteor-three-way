@@ -1,11 +1,6 @@
 /* global ThreeWay: true */
 /* global Demo: true */
 
-// if (Meteor.isClient) {
-// 	ThreeWay.setDebugModeOn();
-// 	ThreeWay.debugModeSelect('bindings');
-// }
-
 ////////////////////////////////////////////////////////////
 // Preamble
 ////////////////////////////////////////////////////////////
@@ -312,4 +307,12 @@ if (Meteor.isClient) {
 			grandchildHelper: "grandchildHelper",
 		},
 	});
+}
+
+
+////////////////////////////////////////////////////////////
+// Grand Child Template
+////////////////////////////////////////////////////////////
+if (Meteor.isClient) {
+	ThreeWay.prepare(Template.DemoThreeWayPreparationDeficient, {});
 }
