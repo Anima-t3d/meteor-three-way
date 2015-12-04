@@ -1072,11 +1072,11 @@ Recall that in the previous section, the following example was described:
 
 The validation flow is as follows:
 
-	1. a change is made in the view which propagates to the view model
-	2. validation starts
-	3. view-model level validation using data in the view model and success/failure call-backs fire
-	4. if the view-model level check does not fail, server validation is run and success/failure call-backs fire
-	5. the overall result is returned
+		1. a change is made in the view which propagates to the view model
+		2. validation starts
+		3. view-model level validation using data in the view model and success/failure call-backs fire
+		4. if the view-model level check does not fail, server validation is run and success/failure call-backs fire
+		5. the overall result is returned
 
 If the change is a candidate for a database update (e.g.: the value is not the same as the previous known value in the database), then validity is used as a requirement for an update. (As is common sense.)
 
